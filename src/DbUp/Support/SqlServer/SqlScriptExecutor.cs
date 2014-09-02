@@ -36,7 +36,7 @@ namespace DbUp.Support.SqlServer
         /// <param name="schema">The schema that contains the table.</param>
         /// <param name="variablesEnabled">Function that returns <c>true</c> if variables should be replaced, <c>false</c> otherwise.</param>
         /// <param name="scriptPreprocessors">Script Preprocessors in addition to variable substitution</param>
-        public SqlScriptExecutor(Func<IConnectionManager> connectionManagerFactory, Func<IUpgradeLog> log, string schema, Func<bool> variablesEnabled, 
+        public SqlScriptExecutor(Func<IConnectionManager> connectionManagerFactory, Func<IUpgradeLog> log, string schema, Func<bool> variablesEnabled,
             IEnumerable<IScriptPreprocessor> scriptPreprocessors)
         {
             Schema = schema;
@@ -88,14 +88,33 @@ namespace DbUp.Support.SqlServer
             if (Schema != null && !variables.ContainsKey("schema"))
                 variables.Add("schema", SqlObjectParser.QuoteSqlObjectName(Schema));
 
-            log().WriteInformation("Executing SQL Server script '{0}'", script.Name);
+            var name = script.Name;
+            log().WriteInformation("Executing SQL Server script '{0}'", name);
 
             var contents = script.Contents;
+            if (script is LargeSqlScript)
+            {
+                while (!string.IsNullOrEmpty(contents))
+                {
+                    ExecuteSql(variables, contents, name);
+                    contents = script.Contents;
+                }
+
+                ((LargeSqlScript)script).Dispose();
+            }
+            else
+            {
+                ExecuteSql(variables, contents, name);
+            }
+        }
+
+        private void ExecuteSql(IDictionary<string, string> variables, string contents, string name)
+        {
             if (string.IsNullOrEmpty(Schema))
                 contents = new StripSchemaPreprocessor().Process(contents);
             if (variablesEnabled())
                 contents = new VariableSubstitutionPreprocessor(variables).Process(contents);
-            contents = (scriptPreprocessors??new IScriptPreprocessor[0])
+            contents = (scriptPreprocessors ?? new IScriptPreprocessor[0])
                 .Aggregate(contents, (current, additionalScriptPreprocessor) => additionalScriptPreprocessor.Process(current));
 
             var connectionManager = connectionManagerFactory();
@@ -130,21 +149,21 @@ namespace DbUp.Support.SqlServer
             }
             catch (SqlException sqlException)
             {
-                log().WriteInformation("SQL exception has occured in script: '{0}'", script.Name);
+                log().WriteInformation("SQL exception has occured in script: '{0}'", name);
                 log().WriteError("Script block number: {0}; Block line {1}; Message: {2}", index, sqlException.LineNumber, sqlException.Procedure, sqlException.Number, sqlException.Message);
                 log().WriteError(sqlException.ToString());
                 throw;
             }
             catch (DbException sqlException)
             {
-                log().WriteInformation("DB exception has occured in script: '{0}'", script.Name);
+                log().WriteInformation("DB exception has occured in script: '{0}'", name);
                 log().WriteError("Script block number: {0}; Error code {1}; Message: {2}", index, sqlException.ErrorCode, sqlException.Message);
                 log().WriteError(sqlException.ToString());
                 throw;
             }
             catch (Exception ex)
             {
-                log().WriteInformation("Exception has occured in script: '{0}'", script.Name);
+                log().WriteInformation("Exception has occured in script: '{0}'", name);
                 log().WriteError(ex.ToString());
                 throw;
             }
@@ -167,7 +186,7 @@ namespace DbUp.Support.SqlServer
                     {
                         var value = reader.GetValue(i);
                         value = value == DBNull.Value ? null : value.ToString();
-                        line.Add((string) value);
+                        line.Add((string)value);
                     }
                     lines.Add(line);
                 }

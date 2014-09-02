@@ -48,11 +48,29 @@ namespace DbUp.Engine
         /// <returns></returns>
         public static SqlScript FromFile(string path)
         {
-            using (FileStream fileStream = new FileStream(path, FileMode.Open, FileAccess.Read))
+            // Large files cause out of memory errors and run much slower as a single transaction
+            var fileInfo = new FileInfo(path);
+            const int eightMb = 8388608;
+            if (fileInfo.Length >= eightMb)
+            {
+                return FromLargeFile(path);
+            }
+            
+            using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read))
             {
                 var fileName = new FileInfo(path).Name;
                 return FromStream(fileName, fileStream);
             }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        public static SqlScript FromLargeFile(string path)
+        {
+            return new LargeSqlScript(path);
         }
 
         /// <summary>
